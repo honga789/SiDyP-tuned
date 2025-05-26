@@ -1,5 +1,4 @@
 # SiDyP
-🔥[Calibrating Pre-trained Language Classifiers on LLM-generated Noisy Labels via Iterative Refinement]
 
 Official code for our KDD'25 paper "Calibrating Pre-trained Language Classifiers on LLM-generated Noisy Labels via Iterative Refinement"
 
@@ -9,7 +8,7 @@ Official code for our KDD'25 paper "Calibrating Pre-trained Language Classifiers
 
 ## Installation
 
-Clone project and create environment with pip:
+Clone project and create environment with conda and pip:
 ```
 conda create -n sidyp python=3.10
 conda activate sidyp
@@ -27,3 +26,9 @@ pip install -r requirements.txt
 ## Training SiDyP
 
 `bash scripts/train.sh`
+
+## Contact
+
+If you have any questions or concerns, please raise GitHub issues or contact
+- Liqin Ye (liqiny@gatech.edu)
+- Agam Shah (ashah482@gatech.edu)
