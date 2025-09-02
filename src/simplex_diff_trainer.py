@@ -15,6 +15,7 @@ from simplex_utils import convert_to_simplex, scale, logits_projection, self_con
                             adjust_learning_rate, EMA
 from simplex_diff import SimplexDDPMScheduler, SimplexDiffusion
 from utils import kl_div
+from sklearn.metrics import accuracy_score, f1_score, classification_report
 
 
 class Simplex_Trainer:
@@ -234,6 +235,7 @@ class Simplex_Trainer:
         self.best_plc.eval()
         self.simplex_diffs.eval()
         start = time.time()
+        all_pred_labels = []
         with torch.no_grad():
             correct = 0
             plm_correct = 0
@@ -271,6 +273,7 @@ class Simplex_Trainer:
                     p_y_y_tilde_final = torch.stack(p_y_y_tilde_list, dim=0).mean(0)
                 _, pred_labels = torch.max(torch.sum(p_y_y_tilde_final, dim=2), dim=1)
 
+                all_pred_labels.append(pred_labels.cpu())
                 correct += torch.sum(pred_labels==target.detach().cpu()).item()
                 plm_correct += torch.sum(plm_pred_labels==target.detach().cpu()).item()
                 all_sample += w.size(0)
@@ -279,7 +282,8 @@ class Simplex_Trainer:
 
         acc = 100 * correct / all_sample
         plm_acc = 100 * plm_correct / all_sample
-        return acc, plm_acc
+        all_pred_labels = torch.cat(all_pred_labels)
+        return acc, plm_acc, all_pred_labels
 
 
     def train(self):
@@ -290,20 +294,39 @@ class Simplex_Trainer:
             
             # validation
             if (epoch % 1 == 0 and epoch >= self.args.warmup_epochs*self.args.diff_epochs) or epoch == self.args.diff_epochs-1:
-                valid_acc, plm_acc  = self.evaluate(epoch, self.valid_dataloader)
+                valid_acc, plm_acc, _ = self.evaluate(epoch, self.valid_dataloader)
                 if valid_acc > best_valid_acc:
                     print("Model Saved!")
                     best_valid_acc = max(best_valid_acc, valid_acc)
                     self.best_diff_model = deepcopy(self.simplex_diffs)
                 print(f"Epoch {epoch}: PLM valid acc: {plm_acc}, Denoising valid acc: {valid_acc}")
 
-        self.test() 
-    
+        return self.test()
+
     def test(self):
         del self.simplex_diffs
         self.simplex_diffs = self.best_diff_model
 
-        test_acc, plm_acc = self.evaluate(self.args.diff_epochs, self.test_dataloader)
+        test_acc, plm_acc, test_pred_labels = self.evaluate(self.args.diff_epochs, self.test_dataloader)
         print(f"PLM test acc: {plm_acc}, Denoising test acc: {test_acc}")
+
+        # Lấy ground truth từ test_dataloader
+        y_true = []
+        for batch in self.test_dataloader:
+            # batch[2] là true label
+            y_true.append(batch[2].cpu())
+        y_true = torch.cat(y_true).numpy()
+        y_pred = test_pred_labels.numpy()
+
+        acc = accuracy_score(y_true, y_pred)
+        f1_macro = f1_score(y_true, y_pred, average="macro", zero_division=0)
+        f1_weighted = f1_score(y_true, y_pred, average="weighted", zero_division=0)
+        print(f"Accuracy: {(acc * 100):.2f}%")
+        print(f"F1-macro: {(f1_macro * 100):.2f}%")
+        print(f"F1-weighted: {(f1_weighted * 100):.2f}%")
+        print("\nClassification report:")
+        print(classification_report(y_true, y_pred, digits=4, zero_division=0))
+
+        return test_pred_labels
             
             
