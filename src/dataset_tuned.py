@@ -11,10 +11,92 @@ from math import inf
 from scipy import stats
 from utils import random_label_assign
 from transformers import BertTokenizer
-from keras.preprocessing.sequence import pad_sequences
+# from keras.preprocessing.sequence import pad_sequences
 from torch.utils.data import TensorDataset, DataLoader, SequentialSampler
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, models
 from sklearn.model_selection import train_test_split
+
+# Drop-in replacement for keras.preprocessing.sequence.pad_sequences
+def pad_sequences(sequences, maxlen=None, dtype="int32", padding="pre", truncating="pre", value=0.0):
+    import numpy as np
+
+    # ---- dtype normalization (accept case-insensitive & aliases) ----
+    if isinstance(dtype, str):
+        key = dtype.lower()
+        dtype_map = {
+            "int32": np.int32,
+            "int64": np.int64,
+            "long":  np.int64,    # alias
+            "float32": np.float32,
+            "float64": np.float64,
+            "object": np.object_, # Keras cho phép dùng object
+        }
+        np_dtype = np.dtype(dtype_map.get(key, key))
+    else:
+        np_dtype = np.dtype(dtype)
+
+    if padding not in {"pre", "post"}:
+        raise ValueError(f"padding must be 'pre' or 'post' (got {padding})")
+    if truncating not in {"pre", "post"}:
+        raise ValueError(f"truncating must be 'pre' or 'post' (got {truncating})")
+
+    # ---- sequences must be iterable of iterables ----
+    if not hasattr(sequences, "__len__"):
+        raise ValueError("`sequences` must be iterable.")
+    sequences = list(sequences)
+    num_samples = len(sequences)
+
+    lengths = []
+    sample_shape = ()
+    got_sample_shape = False
+
+    for s in sequences:
+        try:
+            l = len(s)
+        except TypeError as e:
+            raise ValueError("`sequences` must be a list of iterables. Found non-iterable element.") from e
+        lengths.append(l)
+        if (not got_sample_shape) and l:
+            arr0 = np.asarray(s)
+            if arr0.ndim > 1:
+                sample_shape = arr0.shape[1:]
+            got_sample_shape = True
+
+    if maxlen is None:
+        maxlen = max(lengths) if lengths else 0
+    if maxlen < 0:
+        raise ValueError("`maxlen` must be >= 0.")
+
+    # Trường hợp maxlen == 0: trả về mảng rỗng đúng shape
+    if maxlen == 0:
+        return np.full((num_samples, 0) + sample_shape, value, dtype=np_dtype)
+
+    x = np.full((num_samples, maxlen) + sample_shape, value, dtype=np_dtype)
+
+    for idx, s in enumerate(sequences):
+        if len(s) == 0:
+            continue
+        arr = np.asarray(s)
+
+        # chiều timesteps
+        L = len(arr)
+        trunc_len = min(L, maxlen)
+        if trunc_len == 0:
+            continue
+
+        if truncating == "pre":
+            start = L - trunc_len
+            trunc = arr[start:]
+        else:  # "post"
+            trunc = arr[:trunc_len]
+
+        # Gán theo padding
+        if padding == "post":
+            x[idx, :trunc_len] = trunc
+        else:  # "pre"
+            x[idx, maxlen - trunc_len:] = trunc
+
+    return x
 
 '''Synthetic Noises: SN, ASN, IDN'''
 def corrupt_dataset_SN(args, data):
@@ -108,6 +190,7 @@ def create_dataset(args):
                             # to pytorch tensors, but we need to do padding, so we
                             # can't use these features :( .
                             max_length = MAX_LEN,          # Truncate all sentences.
+                            truncation=True,
                             #return_tensors = 'pt',     # Return pytorch tensors.
                     )
         train_input_ids.append(encoded_sent)
@@ -131,6 +214,7 @@ def create_dataset(args):
                                 # to pytorch tensors, but we need to do padding, so we
                                 # can't use these features :( .
                                 max_length = MAX_LEN,          # Truncate all sentences.
+                                truncation=True,
                                 #return_tensors = 'pt',     # Return pytorch tensors.
                         )
         valid_input_ids.append(encoded_sent)
@@ -153,6 +237,7 @@ def create_dataset(args):
                                 # to pytorch tensors, but we need to do padding, so we
                                 # can't use these features :( .
                                 max_length = MAX_LEN,          # Truncate all sentences.
+                                truncation=True,
                                 #return_tensors = 'pt',     # Return pytorch tensors.
                         )
         test_input_ids.append(encoded_sent)
@@ -170,7 +255,13 @@ def create_dataset(args):
         train_noisy_labels = corrupt_dataset_IDN(args, train_inputs.cpu(), train_true_labels)
         valid_noisy_labels = corrupt_dataset_IDN(args, valid_inputs.cpu(), valid_true_labels)
 
-    embedding_model = SentenceTransformer(args.embed)
+    if args.embed == "bert-base-uncased":
+        bert = models.Transformer('bert-base-uncased')
+        pool = models.Pooling(bert.get_word_embedding_dimension(),
+                            pooling_mode_mean_tokens=True)
+        embedding_model = SentenceTransformer(modules=[bert, pool])
+    else:
+        embedding_model = SentenceTransformer(args.embed)
     train_embedding = embedding_model.encode(train_input_sent, convert_to_tensor=True)
     valid_embedding = embedding_model.encode(valid_input_sent, convert_to_tensor=True)
     test_embedding = embedding_model.encode(test_input_sent, convert_to_tensor=True)

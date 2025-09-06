@@ -14,6 +14,7 @@ config = {
 	"test_data_column": "text",
 	"test_label_column": "label",
 	"num_classes": 4,
+	"embed": "bert-base-uncased",
 }
 
 def build_command(cfg):
