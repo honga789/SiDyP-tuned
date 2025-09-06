@@ -15,6 +15,8 @@ config = {
 	"test_label_column": "label",
 	"num_classes": 4,
 	"embed": "bert-base-uncased",
+	"train_batch_size": 64,
+	"eval_batch_size": 64,
 }
 
 def build_command(cfg):

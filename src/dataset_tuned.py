@@ -175,7 +175,7 @@ def create_dataset(args):
     elif args.dataset == "chemprot":
         MAX_LEN = 512
     else:
-        MAX_LEN = 512
+        MAX_LEN = 128
 
     # Encode train/test text
     # ===========================
