@@ -262,54 +262,169 @@ class SimplexDiffusion(nn.Module):
 
 
 
-class ConditionalLinear(nn.Module):
-    def __init__(self, num_in, num_out, n_steps):
-        super(ConditionalLinear, self).__init__()
+# class ConditionalLinear(nn.Module):
+#     def __init__(self, num_in, num_out, n_steps):
+#         super(ConditionalLinear, self).__init__()
+#         self.num_out = num_out
+#         self.lin = nn.Linear(num_in, num_out)
+#         self.embed = nn.Embedding(n_steps, num_out)
+#         self.embed.weight.data.uniform_()
+
+#     def forward(self, x, t):
+#         out = self.lin(x)
+#         gamma = self.embed(t)
+#         out = gamma.view(-1, self.num_out) * out
+#         return out
+    
+# ============================================================
+# [ADDED] DeepLinearTimeScaled: in → 512 → 256 → out
+# - Hai hidden layers đúng kiến trúc endmodel của bạn (BN→ReLU→Dropout)
+# - GIỮ time-conditioning: scale theo kênh bằng Embedding(t) như ConditionalLinear
+# - Có alias 'hidden' → hidden1 cho tiện gọi từ ConditionalModel
+# ============================================================
+class DeepLinearTimeScaled(nn.Module):
+    def __init__(self, num_in, num_out, n_steps, hidden1=512, hidden2=256, p=0.3, **kw):
+        super().__init__()
         self.num_out = num_out
-        self.lin = nn.Linear(num_in, num_out)
+
+        # alias để tương thích lời gọi: hidden=... (map sang hidden1)
+        if "hidden" in kw and kw["hidden"] is not None:
+            hidden1 = kw["hidden"]
+
+        # Hidden block 1: num_in → 512
+        self.lin1  = nn.Linear(num_in, hidden1)
+        self.bn1   = nn.BatchNorm1d(hidden1)
+        self.act1  = nn.ReLU(inplace=True)
+        self.drop1 = nn.Dropout(p)
+
+        # Hidden block 2: 512 → 256
+        self.lin2  = nn.Linear(hidden1, hidden2)
+        self.bn2   = nn.BatchNorm1d(hidden2)
+        self.act2  = nn.ReLU(inplace=True)
+        self.drop2 = nn.Dropout(p)
+
+        # Output: 256 → out_dim
+        self.lin3  = nn.Linear(hidden2, num_out)
+
+        # Time-conditioning (GIỮ NGUYÊN như ConditionalLinear)
         self.embed = nn.Embedding(n_steps, num_out)
-        self.embed.weight.data.uniform_()
+        self.embed.weight.data.uniform_()  # init như bản gốc
 
     def forward(self, x, t):
-        out = self.lin(x)
-        gamma = self.embed(t)
-        out = gamma.view(-1, self.num_out) * out
+        t = t.long()  # [ADDED]
+
+        # Block 1: in → 512
+        x = self.lin1(x)
+        x = self.bn1(x)
+        x = self.act1(x)
+        x = self.drop1(x)
+
+        # Block 2: 512 → 256
+        x = self.lin2(x)
+        x = self.bn2(x)
+        x = self.act2(x)
+        x = self.drop2(x)
+
+        # Out: 256 → out_dim
+        out = self.lin3(x)
+
+        # TimeScale(t): scale theo kênh bằng gamma(t) (GIỮ nguyên)
+        gamma = self.embed(t)                 # shape: [B, num_out]
+        out   = gamma.view(-1, self.num_out) * out
         return out
 
+# class ConditionalModel(nn.Module):
+#     def __init__(self, n_steps, y_dim=10, w_dim=128, eps=20, guidance=True, x_dim=768):
+#         super(ConditionalModel, self).__init__()
+#         n_steps = n_steps + 1
+#         self.y_dim = y_dim
+#         self.guidance = guidance
+#         self.norm = nn.BatchNorm1d(w_dim)
+
+#         # Unet
+#         if self.guidance:
+#             self.lin1 = ConditionalLinear(y_dim + y_dim, w_dim, n_steps)
+#         else:
+#             self.lin1 = ConditionalLinear(y_dim, w_dim, n_steps)
+            
+#         self.unetnorm1 = nn.BatchNorm1d(w_dim)
+#         self.lin2 = ConditionalLinear(w_dim, w_dim, n_steps)
+#         self.unetnorm2 = nn.BatchNorm1d(w_dim)
+#         self.lin3 = ConditionalLinear(w_dim, w_dim, n_steps)
+#         self.unetnorm3 = nn.BatchNorm1d(w_dim)
+#         self.lin4 = nn.Linear(w_dim, y_dim)
+
+#     def forward(self, y, t, w, x_embed, noisy_y):
+#         w = self.norm(w)
+#         if self.guidance:
+#             y = torch.cat([y, noisy_y], dim=-1)
+
+#         y = self.lin1(y, t)
+#         y = self.unetnorm1(y)
+#         y = F.softplus(y)
+#         y = y * w
+#         y = self.lin2(y, t)
+#         y = self.unetnorm2(y)
+#         y = F.softplus(y)
+#         y = self.lin3(y, t)
+#         y = self.unetnorm3(y)
+#         y = F.softplus(y)
+#         return self.lin4(y)
+
+# ============================================================
+# [CHANGED] ConditionalModel
+# - Thay 3 lớp ConditionalLinear bằng DeepLinearTimeScaled (in→512→256→out)
+# - GIỮ nguyên: guidance concat, BatchNorm, Softplus, vị trí nhân w,
+#   output layer, và toàn bộ API (t, w, noisy_y, x_embed)
+# ============================================================
 class ConditionalModel(nn.Module):
-    def __init__(self, n_steps, y_dim=10, w_dim=128, eps=20, guidance=True, x_dim=768):
+    def __init__(self, n_steps, y_dim=10, w_dim=128, eps=20, guidance=True, x_dim=768,
+                 hidden=512, p_drop=0.3):  # [ADDED] tham số ẩn/dropout (tuỳ chọn)
         super(ConditionalModel, self).__init__()
         n_steps = n_steps + 1
         self.y_dim = y_dim
         self.guidance = guidance
         self.norm = nn.BatchNorm1d(w_dim)
 
-        # Unet
-        if self.guidance:
-            self.lin1 = ConditionalLinear(y_dim + y_dim, w_dim, n_steps)
-        else:
-            self.lin1 = ConditionalLinear(y_dim, w_dim, n_steps)
-            
+        # U-Net tuyến tính (kiểu cũ) → thay core bằng DeepLinearTimeScaled
+        in_dim1 = (y_dim + y_dim) if self.guidance else y_dim
+
+        # [CHANGED] dùng DeepLinearTimeScaled thay ConditionalLinear
+        #             (ẩn: 512→256; dropout: p_drop)
+        self.lin1 = DeepLinearTimeScaled(in_dim1, w_dim, n_steps, hidden1=hidden, hidden2=256, p=p_drop)  # [CHANGED]
         self.unetnorm1 = nn.BatchNorm1d(w_dim)
-        self.lin2 = ConditionalLinear(w_dim, w_dim, n_steps)
+
+        self.lin2 = DeepLinearTimeScaled(w_dim, w_dim, n_steps, hidden1=hidden, hidden2=256, p=p_drop)    # [CHANGED]
         self.unetnorm2 = nn.BatchNorm1d(w_dim)
-        self.lin3 = ConditionalLinear(w_dim, w_dim, n_steps)
+
+        self.lin3 = DeepLinearTimeScaled(w_dim, w_dim, n_steps, hidden1=hidden, hidden2=256, p=p_drop)    # [CHANGED]
         self.unetnorm3 = nn.BatchNorm1d(w_dim)
-        self.lin4 = nn.Linear(w_dim, y_dim)
+
+        self.lin4 = nn.Linear(w_dim, y_dim)  # GIỮ NGUYÊN
 
     def forward(self, y, t, w, x_embed, noisy_y):
+        # chuẩn hoá w như cũ
         w = self.norm(w)
+
+        # guidance: concat noisy_y như cũ
         if self.guidance:
             y = torch.cat([y, noisy_y], dim=-1)
 
-        y = self.lin1(y, t)
-        y = self.unetnorm1(y)
-        y = F.softplus(y)
-        y = y * w
-        y = self.lin2(y, t)
+        # Block 1
+        y = self.lin1(y, t)            # [CHANGED] dùng DeepLinearTimeScaled
+        y = self.unetnorm1(y)          # GIỮ NGUYÊN
+        y = F.softplus(y)              # GIỮ NGUYÊN
+        y = y * w                      # GIỮ ĐÚNG VỊ TRÍ NHÂN w (sau BN/Softplus block 1)
+
+        # Block 2
+        y = self.lin2(y, t)            # [CHANGED]
         y = self.unetnorm2(y)
         y = F.softplus(y)
-        y = self.lin3(y, t)
+
+        # Block 3
+        y = self.lin3(y, t)            # [CHANGED]
         y = self.unetnorm3(y)
         y = F.softplus(y)
+
+        # Output
         return self.lin4(y)
