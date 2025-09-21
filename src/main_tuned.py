@@ -282,7 +282,7 @@ def main():
 
     simplex_trainer = Simplex_Trainer(args, train_dataset, valid_dataloader, test_dataloader, z_train.size(-1), best_plc_model)
     
-    # simplex_trainer.train()
+    simplex_trainer.train()
 
     # ===== [C] AFTER TRAIN =====
     end_wall = time.time()

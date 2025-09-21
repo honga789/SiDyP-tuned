@@ -412,19 +412,19 @@ class ConditionalModel(nn.Module):
 
         # Block 1
         y = self.lin1(y, t)            # [CHANGED] dùng DeepLinearTimeScaled
-        y = self.unetnorm1(y)          # GIỮ NGUYÊN
-        y = F.softplus(y)              # GIỮ NGUYÊN
-        y = y * w                      # GIỮ ĐÚNG VỊ TRÍ NHÂN w (sau BN/Softplus block 1)
+        # y = self.unetnorm1(y)          # GIỮ NGUYÊN
+        # y = F.softplus(y)              # GIỮ NGUYÊN
+        # y = y * w                      # GIỮ ĐÚNG VỊ TRÍ NHÂN w (sau BN/Softplus block 1)
 
         # Block 2
         y = self.lin2(y, t)            # [CHANGED]
-        y = self.unetnorm2(y)
-        y = F.softplus(y)
+        # y = self.unetnorm2(y)
+        # y = F.softplus(y)
 
         # Block 3
         y = self.lin3(y, t)            # [CHANGED]
-        y = self.unetnorm3(y)
-        y = F.softplus(y)
+        # y = self.unetnorm3(y)
+        # y = F.softplus(y)
 
         # Output
         return self.lin4(y)
