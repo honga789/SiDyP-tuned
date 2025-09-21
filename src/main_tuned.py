@@ -1,6 +1,8 @@
 import argparse
 import torch
 import random
+import time
+import pandas as pd
 from rich.traceback import install
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import TensorDataset, SequentialSampler, DataLoader
@@ -13,6 +15,9 @@ from simplex_diff_trainer import Simplex_Trainer
 
 
 def main():
+    # ===== [A] START TIMER =====
+    start_wall = time.time()
+    # ========================================================================
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--dataset", default="agnews", type=str, help="dataset:[semeval, numclaim, chemprot, trec, 20news]")
@@ -219,6 +224,49 @@ def main():
     train_prior_weights = train_prior_weights.permute(1,0,2)
     train_uncertain_marker = train_uncertain_marker.permute(1,0)
 
+    # ==== [B] EXPORT CORRECTED LABEL CSV (Phương án A: argmax từng nhánh -> majority vote) ====
+    # refs: valid_priors majority vote logic (áp dụng tie-break ngẫu nhiên khi hoà)
+    # refs: train_prior_weights shape sau permute: [B, M, C] (B = batch, M = số nhánh)
+    # refs: có sẵn train_/valid_ (true,noisy)_labels từ create_dataset(...)
+    # refs: tên file cần: {dataset}_{noise_type}_corrected-label.csv lấy từ args
+
+    with torch.no_grad():
+        # ---- Train: argmax theo từng nhánh rồi majority vote (giống valid) ----
+        # train_prior_weights: [B, M, C]
+        train_branch_argmax = torch.argmax(train_prior_weights, dim=-1)  # [B, M]
+        tb = train_branch_argmax.transpose(0, 1)                         # [M, B]
+
+        # majority vote với tie-break ngẫu nhiên (giữ đúng tinh thần valid_priors)
+        train_mode, _ = torch.mode(tb, dim=0)                            # [B]
+        train_fixed = torch.empty(tb.size(-1), dtype=torch.long, device=tb.device)
+        for i in range(tb.size(-1)):
+            col = tb[:, i]
+            counts = col.bincount(minlength=int(col.max().item()) + 1)
+            max_freq = counts.max()
+            tied = torch.where(counts == max_freq)[0]
+            if tied.numel() > 1:
+                train_fixed[i] = random.choice(tied.tolist())
+            else:
+                train_fixed[i] = train_mode[i]
+
+        # ---- Valid: đã có nhãn sau majority vote ----
+        valid_fixed = valid_priors.clone().to(train_fixed.device)        # [B_valid]
+
+        # ---- Nối train + valid & xuất CSV ----
+        noisy_all = torch.cat([train_noisy_labels.view(-1), valid_noisy_labels.view(-1)]).cpu().numpy()
+        fixed_all = torch.cat([train_fixed.view(-1), valid_fixed.view(-1)]).cpu().numpy()
+        true_all  = torch.cat([train_true_labels.view(-1), valid_true_labels.view(-1)]).cpu().numpy()
+
+        out_df = pd.DataFrame({
+            "noisy_label": noisy_all,
+            "fixed_label": fixed_all,
+            "true_label":  true_all,
+        })
+
+        out_name = f"{args.dataset}_{args.noise_type}_corrected-label.csv"
+        out_df.to_csv(out_name, index=False)
+    # ==== END EXPORT ==============================================================
+
     scaler = torch.amp.GradScaler("cuda")
 
     # prepare datasets for generative model
@@ -234,7 +282,41 @@ def main():
 
     simplex_trainer = Simplex_Trainer(args, train_dataset, valid_dataloader, test_dataloader, z_train.size(-1), best_plc_model)
     
-    simplex_trainer.train()
+    # simplex_trainer.train()
+
+    # ===== [C] AFTER TRAIN =====
+    end_wall = time.time()
+    wall_sec = end_wall - start_wall
+    print(f"[TIME] Total wall time: {wall_sec:.2f}s ({wall_sec/3600:.4f}h)")
+
+    out_name = f"{args.dataset}_{args.noise_type}_corrected-label.csv"
+    df = pd.read_csv(out_name)
+
+    # Error rates
+    err_before = (df["noisy_label"] != df["true_label"]).mean() * 100.0
+    err_after  = (df["fixed_label"] != df["true_label"]).mean() * 100.0
+    print(f"[LABEL STATS] error_rate_before: {err_before:.2f}% | error_rate_after: {err_after:.2f}%")
+
+    # NF / CF / Trade-off
+    is_noise = df["noisy_label"] != df["true_label"]
+    is_clean = ~is_noise
+    is_edit  = df["fixed_label"] != df["noisy_label"]
+    is_right = df["fixed_label"] == df["true_label"]
+
+    nf_num = (is_noise & is_right).sum()
+    nf_den = is_noise.sum()
+    NF = (nf_num / nf_den) if nf_den > 0 else float("nan")
+
+    cf_num = (is_clean & is_edit).sum()
+    cf_den = is_clean.sum()
+    CF = (cf_num / cf_den) if cf_den > 0 else float("nan")
+
+    T = (nf_num - cf_num) / len(df)  # trade-off theo định nghĩa
+
+    print(f"[LABEL STATS] NF: {NF:.4f} | CF: {CF:.4f} | Trade-off: {T:.6f}")
+    print(f"[LABEL STATS] NF: {NF*100:.2f}% | CF: {CF*100:.2f}% | Trade-off: {T*100:.2f}%")
+    # ========================================================================
+
 if __name__ == "__main__": 
     install(show_locals=False)
     main()
