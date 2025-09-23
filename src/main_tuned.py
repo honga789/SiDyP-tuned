@@ -2,6 +2,7 @@ import argparse
 import torch
 import random
 import time
+import numpy as np
 import pandas as pd
 from rich.traceback import install
 from torch.nn.utils.rnn import pad_sequence
@@ -86,8 +87,10 @@ def main():
 
     print(args)
 
-    train_data, train_sampler, train_dataloader, train_embedding, valid_data, valid_sampler, \
-        valid_dataloader, valid_embedding, test_data, test_sampler, test_dataloader, test_embedding = create_dataset(args)
+    train_data, train_sampler, train_dataloader, train_embedding, \
+    valid_data, valid_sampler, valid_dataloader, valid_embedding, \
+    test_data, test_sampler, test_dataloader, test_embedding, \
+    orig_train_size, orig_train_idx, orig_valid_idx = create_dataset(args)
     train_inputs = torch.stack([train_data[idx][0] for idx in range(len(train_data))], dim=0)
     train_masks = torch.stack([train_data[idx][1] for idx in range(len(train_data))], dim=0)
     train_true_labels = torch.stack([train_data[idx][2] for idx in range(len(train_data))], dim=0)
@@ -253,9 +256,22 @@ def main():
         valid_fixed = valid_priors.clone().to(train_fixed.device)        # [B_valid]
 
         # ---- Nối train + valid & xuất CSV ----
-        noisy_all = torch.cat([train_noisy_labels.view(-1), valid_noisy_labels.view(-1)]).cpu().numpy()
-        fixed_all = torch.cat([train_fixed.view(-1), valid_fixed.view(-1)]).cpu().numpy()
-        true_all  = torch.cat([train_true_labels.view(-1), valid_true_labels.view(-1)]).cpu().numpy()
+        # Khôi phục đúng thứ tự gốc theo ánh xạ orig_train_idx / orig_valid_idx
+        N = int(orig_train_size)
+
+        noisy_all = np.empty(N, dtype=np.int64)
+        fixed_all = np.empty(N, dtype=np.int64)
+        true_all  = np.empty(N, dtype=np.int64)
+
+        # Điền theo chỉ số gốc
+        noisy_all[orig_train_idx] = train_noisy_labels.view(-1).cpu().numpy()
+        noisy_all[orig_valid_idx] = valid_noisy_labels.view(-1).cpu().numpy()
+
+        fixed_all[orig_train_idx] = train_fixed.view(-1).cpu().numpy()
+        fixed_all[orig_valid_idx] = valid_fixed.view(-1).cpu().numpy()
+
+        true_all[orig_train_idx] = train_true_labels.view(-1).cpu().numpy()
+        true_all[orig_valid_idx] = valid_true_labels.view(-1).cpu().numpy()
 
         out_df = pd.DataFrame({
             "noisy_label": noisy_all,

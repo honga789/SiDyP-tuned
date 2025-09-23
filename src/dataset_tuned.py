@@ -154,6 +154,8 @@ def load_dataset(args):
     test_true_labels = test_df[args.test_label_column].values
     test_true_labels = torch.tensor(test_true_labels, dtype=torch.long, device=args.device)
 
+    orig_train_size = len(train_texts)  # Lưu kích thước gốc của tập train
+
     # Chia valid từ train
     train_idx, valid_idx = train_test_split(np.arange(len(train_texts)), test_size=0.2, random_state=42, shuffle=True)
     valid_texts = train_texts[valid_idx]
@@ -163,12 +165,18 @@ def load_dataset(args):
     train_true_labels = train_true_labels[train_idx]
     train_noisy_labels = train_noisy_labels[train_idx]
 
-    return train_texts, train_true_labels, train_noisy_labels, valid_texts, valid_true_labels, valid_noisy_labels, test_texts, test_true_labels
-
+    return (
+        train_texts, train_true_labels, train_noisy_labels,
+        valid_texts, valid_true_labels, valid_noisy_labels,
+        test_texts, test_true_labels,
+        orig_train_size, train_idx, valid_idx
+    )
 
 def create_dataset(args):
-    train_input_sent, train_true_labels, train_noisy_labels, valid_input_sent, valid_true_labels, \
-            valid_noisy_labels, test_input_sent, test_true_labels = load_dataset(args)
+    train_input_sent, train_true_labels, train_noisy_labels, \
+    valid_input_sent, valid_true_labels, valid_noisy_labels, \
+    test_input_sent, test_true_labels, \
+    orig_train_size, train_idx, valid_idx = load_dataset(args)
     
     if args.dataset == "20news":
         MAX_LEN = 150
@@ -279,5 +287,9 @@ def create_dataset(args):
     test_sampler = SequentialSampler(test_data)
     test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=args.eval_batch_size)
 
-    return train_data, train_sampler, train_dataloader, train_embedding, valid_data, valid_sampler, valid_dataloader, valid_embedding, test_data, test_sampler, test_dataloader, test_embedding
-        
+    return (
+        train_data, train_sampler, train_dataloader, train_embedding,
+        valid_data, valid_sampler, valid_dataloader, valid_embedding,
+        test_data, test_sampler, test_dataloader, test_embedding,
+        orig_train_size, train_idx, valid_idx
+    )
