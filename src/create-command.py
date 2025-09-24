@@ -9,20 +9,31 @@ import re
 
 config = {
     "seed": 42,
-    "dataset": "agnews",
+    "dataset": "fashion-mnist",
     "noise_type": "llm",
-    "train_csv_path": "datasets/Agnews-12k-train/ag_news_12k.csv",
-    "train_feather_path": "datasets/Agnews-12k-train/agnews-12k-train-bert-noise/agnews-12k-train_LLM.feather",
-    "train_data_column": "text",
+    "data_type": "image",
+
+    "train_csv_path": "datasets/Fashion-MNIST-test/fashion_mnist-500-rows.csv",
+    "train_image_path": "datasets/Fashion-MNIST-test/images",
+    "train_feather_path": "datasets/Fashion-MNIST-test/fashion-mnist-test-clip-b16-noise/fashion-mnist-test_LLM-500-rows.feather",
+    "train_data_column": "image_name",
     "train_label_column": "label",
-    "test_csv_path": "datasets/agnews-3k-testset/agnews-test-3k.csv",
-    "test_data_column": "text",
+
+    "test_csv_path": "datasets/fashion-mnist-2k5-testset/fashion-mnist-test-2k5-500-rows.csv",
+    "test_image_path": "datasets/fashion-mnist-2k5-testset/images",
+    "test_data_column": "image_name",
     "test_label_column": "label",
-    "num_classes": 4,
-    "embed": "bert-base-uncased",
-    "train_batch_size": 64,
-    "eval_batch_size": 64,
+
+    "num_classes": 10,
+    "dataset_path": None,
+
+    "plc": "clip",
+    "embed": "clip",
+
+    "train_batch_size": 32,
+    "eval_batch_size": 32,
 }
+
 
 def _sanitize(name: str) -> str:
     # Chỉ giữ chữ/số/dấu chấm/gạch/underscore để an toàn khi đặt tên file

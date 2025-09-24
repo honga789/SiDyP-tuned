@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, SequentialSampler, DataLoader
 
 from dataset_tuned import create_dataset
 from utils import set_seed
-from plc_finetune import PLC_Trainer
+# from plc_finetune import PLC_Trainer
 from knn import KNN_prior_dynamic
 from simplex_diff_trainer import Simplex_Trainer
 
@@ -28,19 +28,22 @@ def main():
     parser.add_argument("--syn_type", default="SN", type=str, help="synthetic noise type:[SN, ASN, IDN]")
 
     # Thông số cho dataset text tuỳ chỉnh
+    parser.add_argument('--data_type', type=str, default='text',help="Type of data: 'text' or 'image'")
     parser.add_argument('--train_csv_path', type=str, default=None, help='Path to train CSV file')
+    parser.add_argument('--train_image_path', type=str, default=None, help='Path to folder containing train images')
     parser.add_argument('--train_feather_path', type=str, default=None, help='Path to train feather file')
-    parser.add_argument('--train_data_column', type=str, default=None, help='Name of text column in train CSV')
+    parser.add_argument('--train_data_column', type=str, default=None, help='Name of text column or name of image_name column in train CSV')
     parser.add_argument('--train_label_column', type=str, default=None, help='Name of clean label column in train CSV')
     parser.add_argument('--test_csv_path', type=str, default=None, help='Path to test CSV file')
-    parser.add_argument('--test_data_column', type=str, default=None, help='Name of text column in test CSV')
+    parser.add_argument('--test_image_path', type=str, default=None, help='Path to folder containing test images')
+    parser.add_argument('--test_data_column', type=str, default=None, help='Name of text column or name of image_name column in test CSV')
     parser.add_argument('--test_label_column', type=str, default=None, help='Name of clean label column in test CSV')
     parser.add_argument('--num_classes', type=int, default=None, help='Number of classes')
     parser.add_argument('--dataset_path', type=str, default=None, help='Dataset folder path')
     
     # plc
-    parser.add_argument("--plc", default="bert-base-uncased", type=str, help="pretrain language classifier model")
-    parser.add_argument("--embed", default="WhereIsAI/UAE-Large-V1", type=str, help="embedding model for knn classifier")
+    parser.add_argument("--plc", default="bert-base-uncased", type=str, help="pretrain language classifier model; for image data, pass 'clip'")
+    parser.add_argument("--embed", default="WhereIsAI/UAE-Large-V1", type=str, help="embedding model for knn classifier; for image data, pass 'clip'")
     parser.add_argument("--train_batch_size", default=128, type=int, help="Batch size for training.")
     parser.add_argument("--eval_batch_size", default=128, type=int, help="Batch size for validation.")
     parser.add_argument('--alpha_t', type=float, default=5)
@@ -104,6 +107,10 @@ def main():
     test_true_labels = torch.stack([test_data[idx][2] for idx in range(len(test_data))], dim=0)
 
     print("==========================Stage I: Pre-trained Language Classifier Finetuning==========================")
+    if args.data_type == "image" or str(args.plc).lower().startswith("clip"):
+        from clip_finetune import PLC_Trainer
+    else:
+        from plc_finetune import PLC_Trainer
     plc_trainer = PLC_Trainer(args, train_dataloader, valid_dataloader, test_dataloader)
     z_train, z_valid, z_test, best_plc_model, dists_list = plc_trainer.train()
 
@@ -207,7 +214,7 @@ def main():
     final_votes = torch.empty(valid_priors.size(-1), dtype=torch.long)
     for idx in range(valid_priors.size(-1)):
         valid_priors_model = valid_priors[:, idx]
-        counts = valid_priors_model.bincount(minlength=valid_priors_model.max() + 1)
+        counts = valid_priors_model.bincount(minlength=args.num_classes)
         max_freq = counts.max()
         tied = torch.where(counts == max_freq)[0]
 
@@ -244,7 +251,7 @@ def main():
         train_fixed = torch.empty(tb.size(-1), dtype=torch.long, device=tb.device)
         for i in range(tb.size(-1)):
             col = tb[:, i]
-            counts = col.bincount(minlength=int(col.max().item()) + 1)
+            counts = col.bincount(minlength=args.num_classes)
             max_freq = counts.max()
             tied = torch.where(counts == max_freq)[0]
             if tied.numel() > 1:
@@ -286,19 +293,19 @@ def main():
     scaler = torch.amp.GradScaler("cuda")
 
     # prepare datasets for generative model
-    train_dataset = TensorDataset(z_train, train_priors, train_prior_weights, train_uncertain_marker, train_noisy_labels, train_true_labels, train_embedding)
+    # train_dataset = TensorDataset(z_train, train_priors, train_prior_weights, train_uncertain_marker, train_noisy_labels, train_true_labels, train_embedding)
     
-    valid_dataset = TensorDataset(valid_inputs, valid_masks, valid_priors, z_valid, valid_embedding)
-    valid_sampler = SequentialSampler(valid_dataset)
-    valid_dataloader = DataLoader(valid_dataset, sampler=valid_sampler, batch_size=args.eval_batch_size)
+    # valid_dataset = TensorDataset(valid_inputs, valid_masks, valid_priors, z_valid, valid_embedding)
+    # valid_sampler = SequentialSampler(valid_dataset)
+    # valid_dataloader = DataLoader(valid_dataset, sampler=valid_sampler, batch_size=args.eval_batch_size)
 
-    test_dataset = TensorDataset(test_inputs, test_masks, test_true_labels, z_test, test_embedding)
-    test_sampler = SequentialSampler(test_dataset)
-    test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=args.eval_batch_size)
+    # test_dataset = TensorDataset(test_inputs, test_masks, test_true_labels, z_test, test_embedding)
+    # test_sampler = SequentialSampler(test_dataset)
+    # test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=args.eval_batch_size)
 
-    simplex_trainer = Simplex_Trainer(args, train_dataset, valid_dataloader, test_dataloader, z_train.size(-1), best_plc_model)
+    # simplex_trainer = Simplex_Trainer(args, train_dataset, valid_dataloader, test_dataloader, z_train.size(-1), best_plc_model)
     
-    simplex_trainer.train()
+    # simplex_trainer.train()
 
     # ===== [C] AFTER TRAIN =====
     end_wall = time.time()
