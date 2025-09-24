@@ -260,15 +260,15 @@ def create_dataset(args):
 
         train_dataloader = DataLoader(
             train_data, sampler=train_sampler, batch_size=args.train_batch_size,
-            num_workers=getattr(args, "num_workers", 4), pin_memory=True
+            num_workers=getattr(args, "num_workers", 0), pin_memory=True
         )
         valid_dataloader = DataLoader(
             valid_data, sampler=valid_sampler, batch_size=args.eval_batch_size,
-            num_workers=getattr(args, "num_workers", 4), pin_memory=True
+            num_workers=getattr(args, "num_workers", 0), pin_memory=True
         )
         test_dataloader = DataLoader(
             test_data, sampler=test_sampler, batch_size=args.eval_batch_size,
-            num_workers=getattr(args, "num_workers", 4), pin_memory=True
+            num_workers=getattr(args, "num_workers", 0), pin_memory=True
         )
 
         # 4) Tính EMBEDDING ảnh bằng open_clip
