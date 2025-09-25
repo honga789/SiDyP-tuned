@@ -30,6 +30,7 @@ config = {
     "plc": "clip",
     "embed": "clip",
 
+    "num_workers": 4,
     "train_batch_size": 32,
     "eval_batch_size": 32,
 }

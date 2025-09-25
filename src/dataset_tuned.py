@@ -133,53 +133,73 @@ def corrupt_dataset_IDN(args, inputs, labels):
         new_label[i] = torch.multinomial(p,1)
     return new_label 
 
-def load_dataset(args):
-    """
-    Đọc dataset tuỳ theo args.data_type:
-    - 'text': giữ nguyên hành vi cũ (đọc cột văn bản)
-    - 'image': đọc cột tên file ảnh và ghép với --train_image_path / --test_image_path
-    Feather train vẫn chứa nhãn nhiễu ở cột 'label'.
-    """
+def load_dataset_text(args):
+    # Đọc train CSV
+    train_df = pd.read_csv(args.train_csv_path)
+    # Đọc feather nhãn nhiễu
+    train_feather = pd.read_feather(args.train_feather_path)
+    # Đọc test CSV
+    test_df = pd.read_csv(args.test_csv_path)
 
-    # Đọc train/test CSV và feather (nhãn nhiễu cho train)
+    # Lấy dữ liệu và nhãn sạch
+    train_texts = train_df[args.train_data_column].values
+    train_true_labels = train_df[args.train_label_column].values
+    train_true_labels = torch.tensor(train_true_labels, dtype=torch.long, device=args.device)
+
+    # Lấy nhãn nhiễu từ feather
+    train_noisy_labels = train_feather['label'].values
+    train_noisy_labels = torch.tensor(train_noisy_labels, dtype=torch.long, device=args.device)
+
+    # Test set
+    test_texts = test_df[args.test_data_column].values
+    test_true_labels = test_df[args.test_label_column].values
+    test_true_labels = torch.tensor(test_true_labels, dtype=torch.long, device=args.device)
+
+    orig_train_size = len(train_texts)  # Lưu kích thước gốc của tập train
+
+    # Chia valid từ train
+    train_idx, valid_idx = train_test_split(np.arange(len(train_texts)), test_size=0.2, random_state=42, shuffle=True)
+    valid_texts = train_texts[valid_idx]
+    valid_true_labels = train_true_labels[valid_idx]
+    valid_noisy_labels = train_noisy_labels[valid_idx]
+    train_texts = train_texts[train_idx]
+    train_true_labels = train_true_labels[train_idx]
+    train_noisy_labels = train_noisy_labels[train_idx]
+
+    return (
+        train_texts, train_true_labels, train_noisy_labels,
+        valid_texts, valid_true_labels, valid_noisy_labels,
+        test_texts, test_true_labels,
+        orig_train_size, train_idx, valid_idx
+    )
+
+def load_dataset_image(args):
+    if not getattr(args, "train_image_path", None) or not getattr(args, "test_image_path", None):
+        raise ValueError("For image data, please set both --train_image_path and --test_image_path.")
+
+    # Đọc dữ liệu
     train_df = pd.read_csv(args.train_csv_path)
     train_feather = pd.read_feather(args.train_feather_path)
     test_df = pd.read_csv(args.test_csv_path)
 
-    is_image = getattr(args, "data_type", "text") == "image"
+    # Ghép đường dẫn ảnh
+    base_train = Path(args.train_image_path)
+    base_test = Path(args.test_image_path)
+    train_inputs = train_df[args.train_data_column].astype(str).apply(lambda x: str(base_train / x)).values
+    test_inputs = test_df[args.test_data_column].astype(str).apply(lambda x: str(base_test / x)).values
 
-    # --- Train inputs ---
-    if is_image:
-        if args.train_image_path is None or args.test_image_path is None:
-            raise ValueError("For data_type='image', please set both --train_image_path and --test_image_path.")
-        base_train = Path(args.train_image_path)
-        train_inputs = train_df[args.train_data_column].astype(str).apply(lambda x: str(base_train / x)).values
-    else:
-        train_inputs = train_df[args.train_data_column].values  # text
+    # Nhãn (CPU tensors)
+    train_true_labels = torch.tensor(train_df[args.train_label_column].astype(np.int64).values, dtype=torch.long)
+    train_noisy_labels = torch.tensor(train_feather["label"].astype(np.int64).values, dtype=torch.long)
+    test_true_labels = torch.tensor(test_df[args.test_label_column].astype(np.int64).values, dtype=torch.long)
 
-    # Nhãn sạch (train) và nhãn nhiễu từ feather (train)
-    train_true_labels = torch.tensor(train_df[args.train_label_column].values, dtype=torch.long, device=args.device)
-    train_noisy_labels = torch.tensor(train_feather["label"].values, dtype=torch.long, device=args.device)
-
-    # --- Test inputs ---
-    if is_image:
-        base_test = Path(args.test_image_path)
-        test_inputs = test_df[args.test_data_column].astype(str).apply(lambda x: str(base_test / x)).values
-    else:
-        test_inputs = test_df[args.test_data_column].values  # text
-
-    # Nhãn sạch (test)
-    test_true_labels = torch.tensor(test_df[args.test_label_column].values, dtype=torch.long, device=args.device)
-
-    # Kích thước gốc của tập train
+    # Chia valid
     orig_train_size = len(train_inputs)
-
-    # Chia valid từ train (giữ nguyên logic cũ)
     train_idx, valid_idx = train_test_split(
-        np.arange(len(train_inputs)), test_size=0.2, random_state=42, shuffle=True
+        np.arange(orig_train_size), test_size=0.2, random_state=42, shuffle=True
     )
 
-    # Tách train/valid cho inputs và labels
+    # Tách train/valid
     valid_inputs = train_inputs[valid_idx]
     valid_true_labels = train_true_labels[valid_idx]
     valid_noisy_labels = train_noisy_labels[valid_idx]
@@ -188,7 +208,6 @@ def load_dataset(args):
     train_true_labels = train_true_labels[train_idx]
     train_noisy_labels = train_noisy_labels[train_idx]
 
-    # Giữ nguyên định dạng trả về để create_dataset dùng được
     return (
         train_inputs, train_true_labels, train_noisy_labels,
         valid_inputs, valid_true_labels, valid_noisy_labels,
@@ -215,7 +234,7 @@ def create_dataset(args):
         train_inputs_raw, train_true_labels, train_noisy_labels, \
         valid_inputs_raw, valid_true_labels, valid_noisy_labels, \
         test_inputs_raw,  test_true_labels, \
-        orig_train_size, train_idx, valid_idx = load_dataset(args)
+        orig_train_size, train_idx, valid_idx = load_dataset_image(args)
 
         device = torch.device(getattr(args, "device", "cuda" if torch.cuda.is_available() else "cpu"))
 
@@ -230,8 +249,8 @@ def create_dataset(args):
         class _ImageDataset(torch.utils.data.Dataset):
             def __init__(self, paths, true_labels, noisy_labels=None, preprocess=None):
                 self.paths = list(paths)
-                self.true_labels = true_labels
-                self.noisy_labels = noisy_labels
+                self.true_labels  = np.asarray(true_labels, dtype=np.int64)
+                self.noisy_labels = None if noisy_labels is None else np.asarray(noisy_labels, dtype=np.int64)
                 self.preprocess = preprocess
 
             def __len__(self):
@@ -241,10 +260,10 @@ def create_dataset(args):
                 path = str(self.paths[idx])
                 img = Image.open(path).convert("RGB")
                 px = self.preprocess(img)  # [3, H, W]
-                true = torch.as_tensor(int(self.true_labels[idx]), dtype=torch.long)
+                true = torch.tensor(self.true_labels[idx]).long()
                 mask = torch.zeros(1, dtype=torch.long)  # placeholder cho ảnh
                 if self.noisy_labels is not None:
-                    noisy = torch.as_tensor(int(self.noisy_labels[idx]), dtype=torch.long)
+                    noisy = torch.tensor(self.noisy_labels[idx]).long()
                     return px, mask, true, noisy
                 else:
                     return px, mask, true
@@ -260,15 +279,21 @@ def create_dataset(args):
 
         train_dataloader = DataLoader(
             train_data, sampler=train_sampler, batch_size=args.train_batch_size,
-            num_workers=getattr(args, "num_workers", 0), pin_memory=True
+            num_workers=getattr(args, "num_workers", 0),
+            pin_memory=True,
+            persistent_workers=getattr(args, "num_workers", 0) > 0,
         )
         valid_dataloader = DataLoader(
             valid_data, sampler=valid_sampler, batch_size=args.eval_batch_size,
-            num_workers=getattr(args, "num_workers", 0), pin_memory=True
+            num_workers=getattr(args, "num_workers", 0),
+            pin_memory=True,
+            persistent_workers=getattr(args, "num_workers", 0) > 0,
         )
         test_dataloader = DataLoader(
             test_data, sampler=test_sampler, batch_size=args.eval_batch_size,
-            num_workers=getattr(args, "num_workers", 0), pin_memory=True
+            num_workers=getattr(args, "num_workers", 0),
+            pin_memory=True,
+            persistent_workers=getattr(args, "num_workers", 0) > 0,
         )
 
         # 4) Tính EMBEDDING ảnh bằng open_clip
@@ -296,7 +321,7 @@ def create_dataset(args):
     train_input_sent, train_true_labels, train_noisy_labels, \
     valid_input_sent, valid_true_labels, valid_noisy_labels, \
     test_input_sent, test_true_labels, \
-    orig_train_size, train_idx, valid_idx = load_dataset(args)
+    orig_train_size, train_idx, valid_idx = load_dataset_text(args)
     
     if args.dataset == "20news":
         MAX_LEN = 150

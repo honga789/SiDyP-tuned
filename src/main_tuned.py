@@ -40,6 +40,7 @@ def main():
     parser.add_argument('--test_label_column', type=str, default=None, help='Name of clean label column in test CSV')
     parser.add_argument('--num_classes', type=int, default=None, help='Number of classes')
     parser.add_argument('--dataset_path', type=str, default=None, help='Dataset folder path')
+    parser.add_argument('--num_workers', type=int, default=0, help='Num of worker for DataLoader')
     
     # plc
     parser.add_argument("--plc", default="bert-base-uncased", type=str, help="pretrain language classifier model; for image data, pass 'clip'")
@@ -49,7 +50,7 @@ def main():
     parser.add_argument('--alpha_t', type=float, default=5)
     parser.add_argument("--plc_epochs", default=10, type=int, help="Number of epochs for PLC training.")
     parser.add_argument("--plc_lr", default=5e-5, type=float, help="The initial learning rate for PLC Adam.")
-    parser.add_argument("--num_model", type=float, default=3, help='The number of model branches')
+    parser.add_argument("--num_model", type=int, default=3, help='The number of model branches')
     # dynamic prior retrieval
     parser.add_argument("--noise_ratio", type=float, default=0.3, help='The ratio of noisy data to be poisoned.')
     parser.add_argument("--K", type=int, default=10, help="certain label retrieval threshold")
