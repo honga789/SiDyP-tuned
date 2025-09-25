@@ -13,19 +13,18 @@ config = {
     "noise_type": "llm",
     "data_type": "image",
 
-    "train_csv_path": "datasets/Fashion-MNIST-test/fashion_mnist-500-rows.csv",
+    "train_csv_path": "datasets/Fashion-MNIST-test/fashion_mnist.csv",
     "train_image_path": "datasets/Fashion-MNIST-test/images",
-    "train_feather_path": "datasets/Fashion-MNIST-test/fashion-mnist-test-clip-b16-noise/fashion-mnist-test_LLM-500-rows.feather",
+    "train_feather_path": "datasets/Fashion-MNIST-test/fashion-mnist-test-clip-b16-noise/fashion-mnist-test_LLM.feather",
     "train_data_column": "image_name",
     "train_label_column": "label",
 
-    "test_csv_path": "datasets/fashion-mnist-2k5-testset/fashion-mnist-test-2k5-500-rows.csv",
+    "test_csv_path": "datasets/fashion-mnist-2k5-testset/fashion-mnist-test-2k5.csv",
     "test_image_path": "datasets/fashion-mnist-2k5-testset/images",
     "test_data_column": "image_name",
     "test_label_column": "label",
 
     "num_classes": 10,
-    "dataset_path": None,
 
     "plc": "clip",
     "embed": "clip",
