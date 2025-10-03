@@ -290,6 +290,7 @@ def main():
         out_name = f"{args.dataset}_{args.noise_type}_corrected-label.csv"
         out_df.to_csv(out_name, index=False)
     # ==== END EXPORT ==============================================================
+    fix_done_wall = time.time()
 
     scaler = torch.amp.GradScaler("cuda")
 
@@ -310,6 +311,8 @@ def main():
 
     # ===== [C] AFTER TRAIN =====
     end_wall = time.time()
+    elapsed_fix = fix_done_wall - start_wall
+    print(f"[TIME] From start -> fixing done: {elapsed_fix:.2f}s ({elapsed_fix/3600:.4f}h)")
     wall_sec = end_wall - start_wall
     print(f"[TIME] Total wall time: {wall_sec:.2f}s ({wall_sec/3600:.4f}h)")
 
