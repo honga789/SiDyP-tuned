@@ -294,19 +294,19 @@ def main():
     scaler = torch.amp.GradScaler("cuda")
 
     # prepare datasets for generative model
-    # train_dataset = TensorDataset(z_train, train_priors, train_prior_weights, train_uncertain_marker, train_noisy_labels, train_true_labels, train_embedding)
+    train_dataset = TensorDataset(z_train, train_priors, train_prior_weights, train_uncertain_marker, train_noisy_labels, train_true_labels, train_embedding)
     
-    # valid_dataset = TensorDataset(valid_inputs, valid_masks, valid_priors, z_valid, valid_embedding)
-    # valid_sampler = SequentialSampler(valid_dataset)
-    # valid_dataloader = DataLoader(valid_dataset, sampler=valid_sampler, batch_size=args.eval_batch_size)
+    valid_dataset = TensorDataset(valid_inputs, valid_masks, valid_priors, z_valid, valid_embedding)
+    valid_sampler = SequentialSampler(valid_dataset)
+    valid_dataloader = DataLoader(valid_dataset, sampler=valid_sampler, batch_size=args.eval_batch_size)
 
-    # test_dataset = TensorDataset(test_inputs, test_masks, test_true_labels, z_test, test_embedding)
-    # test_sampler = SequentialSampler(test_dataset)
-    # test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=args.eval_batch_size)
+    test_dataset = TensorDataset(test_inputs, test_masks, test_true_labels, z_test, test_embedding)
+    test_sampler = SequentialSampler(test_dataset)
+    test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=args.eval_batch_size)
 
-    # simplex_trainer = Simplex_Trainer(args, train_dataset, valid_dataloader, test_dataloader, z_train.size(-1), best_plc_model)
+    simplex_trainer = Simplex_Trainer(args, train_dataset, valid_dataloader, test_dataloader, z_train.size(-1), best_plc_model)
     
-    # simplex_trainer.train()
+    simplex_trainer.train()
 
     # ===== [C] AFTER TRAIN =====
     end_wall = time.time()
