@@ -2,6 +2,7 @@ import argparse
 import torch
 import random
 import time
+import os
 import numpy as np
 import pandas as pd
 from rich.traceback import install
@@ -309,6 +310,55 @@ def main():
     
     simplex_trainer.train()
 
+    # ==== [B’] RE-EXPORT CORRECTED LABELS AFTER DIFFUSION (post-diff) ====
+    with torch.no_grad():
+        # dữ liệu train (đã bị update weights trong quá trình train diffusion)
+        _, y_train_branches, weights_post, uncertain_post, \
+            train_noisy_y, train_true_y, _ = simplex_trainer.train_dataset[:]
+
+        # Majority vote như trước: argmax theo từng nhánh rồi vote qua các nhánh
+        # weights_post: [B, M, C]
+        train_branch_argmax_post = torch.argmax(weights_post, dim=-1)  # [B, M]
+        tb_post = train_branch_argmax_post.transpose(0, 1)             # [M, B]
+
+        train_mode_post, _ = torch.mode(tb_post, dim=0)                # [B]
+        train_fixed_post = torch.empty(tb_post.size(-1), dtype=torch.long)
+        for i in range(tb_post.size(-1)):
+            col = tb_post[:, i]
+            counts = col.bincount(minlength=args.num_classes)
+            max_freq = counts.max()
+            tied = torch.where(counts == max_freq)[0]
+            if tied.numel() > 1:
+                train_fixed_post[i] = random.choice(tied.tolist())
+            else:
+                train_fixed_post[i] = train_mode_post[i]
+
+        # Phần valid: giữ nguyên nhãn đã vote ở Stage I
+        valid_fixed_post = valid_priors.clone()
+
+        # Ghép lại theo chỉ số gốc như trước để xuất CSV mới
+        N = int(orig_train_size)
+        noisy_all = np.empty(N, dtype=np.int64)
+        fixed_all = np.empty(N, dtype=np.int64)
+        true_all  = np.empty(N, dtype=np.int64)
+
+        noisy_all[orig_train_idx] = train_noisy_y.view(-1).cpu().numpy()
+        noisy_all[orig_valid_idx] = valid_noisy_labels.view(-1).cpu().numpy()
+
+        fixed_all[orig_train_idx] = train_fixed_post.view(-1).cpu().numpy()
+        fixed_all[orig_valid_idx] = valid_fixed_post.view(-1).cpu().numpy()
+
+        true_all[orig_train_idx] = train_true_y.view(-1).cpu().numpy()
+        true_all[orig_valid_idx] = valid_true_labels.view(-1).cpu().numpy()
+
+        out_df_post = pd.DataFrame({
+            "noisy_label": noisy_all,
+            "fixed_label": fixed_all,
+            "true_label":  true_all,
+        })
+        out_name_post = f"{args.dataset}_{args.noise_type}_corrected-label_postdiff.csv"
+        out_df_post.to_csv(out_name_post, index=False)
+
     # ===== [C] AFTER TRAIN =====
     end_wall = time.time()
     elapsed_fix = fix_done_wall - start_wall
@@ -316,32 +366,53 @@ def main():
     wall_sec = end_wall - start_wall
     print(f"[TIME] Total wall time: {wall_sec:.2f}s ({wall_sec/3600:.4f}h)")
 
-    out_name = f"{args.dataset}_{args.noise_type}_corrected-label.csv"
-    df = pd.read_csv(out_name)
+    def compute_label_stats(df: pd.DataFrame):
+        # Error rates
+        err_before = (df["noisy_label"] != df["true_label"]).mean() * 100.0
+        err_after  = (df["fixed_label"] != df["true_label"]).mean() * 100.0
 
-    # Error rates
-    err_before = (df["noisy_label"] != df["true_label"]).mean() * 100.0
-    err_after  = (df["fixed_label"] != df["true_label"]).mean() * 100.0
-    print(f"[LABEL STATS] error_rate_before: {err_before:.2f}% | error_rate_after: {err_after:.2f}%")
+        # NF / CF / Trade-off
+        is_noise = df["noisy_label"] != df["true_label"]
+        is_clean = ~is_noise
+        is_edit  = df["fixed_label"] != df["noisy_label"]
+        is_right = df["fixed_label"] == df["true_label"]
 
-    # NF / CF / Trade-off
-    is_noise = df["noisy_label"] != df["true_label"]
-    is_clean = ~is_noise
-    is_edit  = df["fixed_label"] != df["noisy_label"]
-    is_right = df["fixed_label"] == df["true_label"]
+        nf_num = (is_noise & is_right).sum()
+        nf_den = is_noise.sum()
+        NF = (nf_num / nf_den) if nf_den > 0 else float("nan")
 
-    nf_num = (is_noise & is_right).sum()
-    nf_den = is_noise.sum()
-    NF = (nf_num / nf_den) if nf_den > 0 else float("nan")
+        cf_num = (is_clean & is_edit).sum()
+        cf_den = is_clean.sum()
+        CF = (cf_num / cf_den) if cf_den > 0 else float("nan")
 
-    cf_num = (is_clean & is_edit).sum()
-    cf_den = is_clean.sum()
-    CF = (cf_num / cf_den) if cf_den > 0 else float("nan")
+        T = (nf_num - cf_num) / len(df)  # trade-off theo định nghĩa
 
-    T = (nf_num - cf_num) / len(df)  # trade-off theo định nghĩa
+        return {
+            "err_before": err_before, "err_after": err_after,
+            "NF": NF, "CF": CF, "T": T
+        }
 
-    print(f"[LABEL STATS] NF: {NF:.4f} | CF: {CF:.4f} | Trade-off: {T:.6f}")
-    print(f"[LABEL STATS] NF: {NF*100:.2f}% | CF: {CF*100:.2f}% | Trade-off: {T*100:.2f}%")
+    base_csv = f"{args.dataset}_{args.noise_type}_corrected-label.csv"
+    post_csv = f"{args.dataset}_{args.noise_type}_corrected-label_postdiff.csv"
+
+    results = {}
+
+    for label, path in [("BASE (pre-diff)", base_csv), ("POST-DIFF", post_csv)]:
+        if os.path.exists(path):
+            df = pd.read_csv(path)
+            stats = compute_label_stats(df)
+            results[label] = stats
+            print(f"[LABEL STATS][{label}] error_rate_before: {stats['err_before']:.2f}% | error_rate_after: {stats['err_after']:.2f}%")
+            print(f"[LABEL STATS][{label}] NF: {stats['NF']*100:.2f}% | CF: {stats['CF']*100:.2f}% | Trade-off: {stats['T']*100:.2f}%")
+        else:
+            print(f"[LABEL STATS][{label}] file not found: {path}")
+
+    # So sánh chênh lệch post - base (nếu đủ 2 file)
+    if "BASE (pre-diff)" in results and "POST-DIFF" in results:
+        b, p = results["BASE (pre-diff)"], results["POST-DIFF"]
+        print("[LABEL STATS][DELTA POST - BASE]")
+        print(f"Δ err_after: {p['err_after']-b['err_after']:+.2f} pp (âm là tốt)")
+        print(f"Δ NF: {(p['NF']-b['NF'])*100:+.2f} pp | Δ CF: {(p['CF']-b['CF'])*100:+.2f} pp | Δ Trade-off: {(p['T']-b['T'])*100:+.2f} pp")
     # ========================================================================
 
 if __name__ == "__main__": 
