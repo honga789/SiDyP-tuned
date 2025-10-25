@@ -87,8 +87,7 @@ class Simplex_Trainer:
     def update_model(self, epoch):
         self.simplex_diffs.train()
         train_sampler = SequentialSampler(self.train_dataset)
-        train_loader = DataLoader(self.train_dataset, sampler=train_sampler, batch_size=self.args.train_batch_size)
-
+        train_loader = DataLoader(self.train_dataset, sampler=train_sampler, batch_size=self.args.train_batch_size, drop_last=True)
         if epoch <= self.args.warmup_epochs*self.args.diff_epochs:
             self.lambda_t = 0
         else:
