@@ -177,5 +177,5 @@ cython_debug/
 .vscode/
 # over 100mb
 # cat clothing-1M-train_valid_embedding_clip-base-16_with_label.feather.tar.gz.part-* | tar -xzvf -
-clothing-1M-train_valid_embedding_clip-base-16.feather
-clothing-1M-train_valid_embedding_clip-base-16_with_label.feather
+/datasets/Clothing1M/embedding/clothing-1M-train_valid_embedding_clip-base-16.feather
+/datasets/Clothing1M/embedding-with-noisy_label/clothing-1M-train_valid_embedding_clip-base-16_with_label.feather
